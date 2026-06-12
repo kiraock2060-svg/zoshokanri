@@ -247,6 +247,19 @@
   <!-- ===== 本棚タブ ===== -->
   <div class="tab-content active" id="tab-shelves">
     <div class="card">
+      <h2>データのバックアップ・復元</h2>
+      <p style="font-size:12px;color:#9a8d78;margin-top:0;">
+        機種変更などの前に「書き出し」でファイルを保存しておくと、新しい端末で「読み込み」して復元できます。
+      </p>
+      <div class="row">
+        <button onclick="exportData()">📤 データを書き出す</button>
+        <button class="secondary" onclick="document.getElementById('importFile').click()">📥 データを読み込む</button>
+      </div>
+      <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importData(event)">
+      <p id="backupStatus" style="font-size:12px; margin:6px 0 0;"></p>
+    </div>
+
+    <div class="card">
       <h2>本棚を追加</h2>
       <label>本棚の名前</label>
       <input type="text" id="shelfName" placeholder="例：リビング書棚">
@@ -423,6 +436,82 @@ let books = [];
 function uid(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 }
+
+/* ===========================================================
+   データのバックアップ・復元
+   =========================================================== */
+function exportData(){
+  const payload = {
+    appName: "myBookshelfApp",
+    exportedAt: new Date().toISOString(),
+    shelves: shelves,
+    books: books
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+
+  const now = new Date();
+  const ts = now.getFullYear() + "-" +
+    String(now.getMonth()+1).padStart(2,"0") + "-" +
+    String(now.getDate()).padStart(2,"0");
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "蔵書データ_" + ts + ".json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  const statusEl = document.getElementById("backupStatus");
+  statusEl.style.color = "var(--ok)";
+  statusEl.textContent = "データを書き出しました。ファイルを安全な場所に保存してください。";
+}
+
+async function importData(event){
+  const file = event.target.files[0];
+  const statusEl = document.getElementById("backupStatus");
+  if(!file) return;
+
+  if(!confirm("読み込むと、現在のアプリ内のデータはすべて上書きされます。続けますか？")){
+    event.target.value = "";
+    return;
+  }
+
+  try{
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    if(!data.shelves || !data.books){
+      throw new Error("形式が正しくありません");
+    }
+
+    // 既存データを全削除
+    for(const s of shelves){ await del("shelves", s.id); }
+    for(const b of books){ await del("books", b.id); }
+
+    // 読み込んだデータを保存
+    for(const s of data.shelves){ await put("shelves", s); }
+    for(const b of data.books){ await put("books", b); }
+
+    shelves = data.shelves;
+    books = data.books;
+
+    renderShelfList();
+    refreshBookShelfSelect();
+    renderShelfView();
+    renderLoanList();
+
+    statusEl.style.color = "var(--ok)";
+    statusEl.textContent = "データを読み込みました（本棚 " + shelves.length + "件 / 本 " + books.length + "件）。";
+  }catch(e){
+    console.error(e);
+    statusEl.style.color = "var(--danger)";
+    statusEl.textContent = "読み込みに失敗しました。正しいバックアップファイルを選択してください。";
+  }
+  event.target.value = "";
+}
+
 
 /* ===========================================================
    タブ切替
