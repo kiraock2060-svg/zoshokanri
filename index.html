@@ -157,17 +157,117 @@
     border-radius:6px;
     padding:6px 8px;
     margin-bottom:4px;
+    gap:6px;
+  }
+  .book-item-main{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex:1;
+    min-width:0;
+  }
+  .book-cover, .book-cover-placeholder{
+    width:36px;
+    height:50px;
+    border-radius:3px;
+    flex-shrink:0;
+  }
+  .book-cover{
+    object-fit:cover;
+    border:1px solid var(--line);
+    background:#fff;
+  }
+  .book-cover-placeholder{
+    border:1px solid var(--line);
+    background:#f0e9dc;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:16px;
+  }
+  .book-text{flex:1; min-width:0;}
+  .drag-handle{
+    flex-shrink:0;
+    width:30px;
+    height:40px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:18px;
+    color:#b8ab95;
+    touch-action:none;
+    cursor:grab;
+    border-left:1px solid var(--line);
+  }
+  .book-item.dragging{
+    opacity:0.4;
+    background:#f0e9dc;
+  }
+  .search-bar{
+    margin-bottom:10px;
+  }
+  .cover-preview{
+    width:60px;
+    height:84px;
+    object-fit:cover;
+    border:1px solid var(--line);
+    border-radius:4px;
+    margin-top:6px;
+    background:#fff;
+  }
+  .modal-cover{
+    width:90px;
+    height:126px;
+    object-fit:cover;
+    border:1px solid var(--line);
+    border-radius:4px;
+    display:block;
+    margin:0 auto 10px;
+    background:#f0e9dc;
+  }
+  .book-title{
+    font-size:13px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .book-meta{
+    font-size:11px;
+    color:#9a8d78;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .drag-handle{
+    flex-shrink:0;
+    width:30px;
+    height:38px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:18px;
+    color:#caa87a;
+    touch-action:none;
     cursor:grab;
   }
-  .book-item.dragging{opacity:0.4;}
-  .book-title{font-size:13px; flex:1;}
-  .book-meta{font-size:11px; color:#9a8d78;}
+  .drag-ghost{
+    position:fixed;
+    pointer-events:none;
+    z-index:200;
+    opacity:0.9;
+    box-shadow:0 4px 10px rgba(0,0,0,0.25);
+    border-radius:6px;
+  }
+  .row-block.drop-target{
+    background:#f3ecdf;
+  }
   .status-tag{
     font-size:11px;
     padding:2px 6px;
     border-radius:10px;
     margin-left:6px;
     white-space:nowrap;
+    flex-shrink:0;
   }
   .status-在庫{background:#e6efe5; color:var(--ok);}
   .status-持出中{background:#f7e7d6; color:#b07a3a;}
@@ -311,6 +411,8 @@
         <button class="secondary" style="flex:0 0 auto;" onclick="lookupByIsbnField()">この番号で検索</button>
       </div>
       <p id="isbnLookupStatus" style="font-size:12px; color:#9a8d78; margin:4px 0 0;"></p>
+      <input type="hidden" id="bookCoverUrl" value="">
+      <img id="coverPreview" class="cover-preview" style="display:none;">
 
       <button onclick="addBook()">この本を登録する</button>
     </div>
@@ -332,8 +434,14 @@
     <div class="card">
       <h2>本棚をながめる・並べ替える・貸出操作</h2>
       <p style="font-size:12px;color:#9a8d78;margin-top:0;">
-        本をドラッグすると同じ段の中で並び順を変更できます。タップすると詳細・貸出状態の操作ができます。
+        右端のハンドル（⠿）をドラッグすると並び順を変更できます。タップすると詳細・貸出状態の操作ができます。
       </p>
+
+      <div class="search-bar">
+        <input type="text" id="bookSearchInput" placeholder="🔍 書名・著者・出版者・ISBNで検索" oninput="onSearchInput()">
+      </div>
+
+      <div id="searchResultArea" style="display:none;"></div>
       <div id="shelfViewArea"><div class="empty">まだ本棚が登録されていません</div></div>
     </div>
   </div>
@@ -526,7 +634,7 @@ function switchTab(name){
 
   if(name==="add") refreshBookShelfSelect();
   if(name==="map") renderMap();
-  if(name==="view") renderShelfView();
+  if(name==="view"){ renderShelfView(); onSearchInput(); }
   if(name==="loans") renderLoanList();
   if(name==="shelves") renderShelfList();
 }
@@ -646,6 +754,7 @@ async function addBook(){
     publisher: document.getElementById("bookPublisher").value.trim(),
     year: document.getElementById("bookYear").value.trim(),
     isbn: document.getElementById("bookIsbn").value.trim(),
+    coverUrl: document.getElementById("bookCoverUrl").value.trim(),
     status: "在庫",
     borrower: "",
     outDate: "",
@@ -655,11 +764,82 @@ async function addBook(){
   await put("books", book);
   books.push(book);
 
-  ["bookTitle","bookAuthor","bookPublisher","bookYear","bookIsbn"].forEach(id=>{
+  ["bookTitle","bookAuthor","bookPublisher","bookYear","bookIsbn","bookCoverUrl"].forEach(id=>{
     document.getElementById(id).value = "";
   });
+  document.getElementById("coverPreview").style.display = "none";
+  document.getElementById("isbnLookupStatus").textContent = "";
+  document.getElementById("scanStatus").textContent = "";
   document.getElementById("bookTitle").focus();
   alert("登録しました：「" + title + "」");
+}
+
+/* ===========================================================
+   本のアイテム表示用の共通関数
+   =========================================================== */
+function bookCoverHtml(b){
+  if(b.coverUrl){
+    return `<img class="book-cover" src="${escapeAttr(b.coverUrl)}" alt="" loading="lazy">`;
+  }
+  return `<div class="book-cover-placeholder">📕</div>`;
+}
+
+// withHandle: 並べ替えハンドルを表示するか（本棚を見るタブのみ）
+function bookItemHtml(b, opts){
+  opts = opts || {};
+  const handleHtml = opts.withHandle
+    ? `<div class="drag-handle" data-id="${b.id}">⠿</div>`
+    : "";
+  const extraMeta = opts.extraMeta ? `<div class="book-meta">${opts.extraMeta}</div>` : "";
+
+  return `
+    <div class="book-item" data-id="${b.id}" data-shelf="${opts.shelfId||""}" data-row="${opts.row||""}">
+      <div class="book-item-main" onclick="openBookModal('${b.id}')">
+        ${bookCoverHtml(b)}
+        <div class="book-text">
+          <div class="book-title">${escapeHtml(b.title)}</div>
+          <div class="book-meta">${escapeHtml(b.author||"")}</div>
+          ${extraMeta}
+        </div>
+        <span class="status-tag status-${b.status}">${b.status}</span>
+      </div>
+      ${handleHtml}
+    </div>
+  `;
+}
+
+/* ===========================================================
+   検索機能
+   =========================================================== */
+function onSearchInput(){
+  const query = document.getElementById("bookSearchInput").value.trim().toLowerCase();
+  const resultArea = document.getElementById("searchResultArea");
+  const shelfArea = document.getElementById("shelfViewArea");
+
+  if(!query){
+    resultArea.style.display = "none";
+    shelfArea.style.display = "";
+    return;
+  }
+
+  const matched = books.filter(b=>{
+    return [b.title, b.author, b.publisher, b.isbn]
+      .some(field => (field||"").toLowerCase().includes(query));
+  });
+
+  shelfArea.style.display = "none";
+  resultArea.style.display = "";
+
+  if(matched.length===0){
+    resultArea.innerHTML = '<div class="empty">該当する本が見つかりませんでした</div>';
+    return;
+  }
+
+  resultArea.innerHTML = matched.map(b=>{
+    const shelf = shelves.find(s=>s.id===b.shelfId);
+    const location = (shelf?shelf.name:"（不明な本棚）") + " ・ " + (b.rowNumber||"?") + "段目";
+    return bookItemHtml(b, { extraMeta: escapeHtml(location) });
+  }).join("");
 }
 
 /* ===========================================================
@@ -682,25 +862,10 @@ function renderShelfView(){
 
       const itemsHtml = rowBooks.length===0
         ? `<div class="empty" style="padding:6px;">（本がありません）</div>`
-        : rowBooks.map(b=>`
-            <div class="book-item" draggable="true"
-                 data-id="${b.id}" data-shelf="${shelf.id}" data-row="${r}"
-                 ondragstart="onDragStart(event)"
-                 ondragover="onDragOver(event)"
-                 ondrop="onDrop(event)"
-                 ondragend="onDragEnd(event)"
-                 onclick="openBookModal('${b.id}')">
-              <div>
-                <div class="book-title">${escapeHtml(b.title)}</div>
-                <div class="book-meta">${escapeHtml(b.author||"")}</div>
-              </div>
-              <span class="status-tag status-${b.status}">${b.status}</span>
-            </div>
-          `).join("");
+        : rowBooks.map(b=>bookItemHtml(b, {withHandle:true, shelfId:shelf.id, row:r})).join("");
 
       rowsHtml += `
-        <div class="row-block" data-row-container="${shelf.id}-${r}" data-shelf="${shelf.id}" data-row="${r}"
-             ondragover="onDragOver(event)" ondrop="onDrop(event)">
+        <div class="row-block" data-row-container="${shelf.id}-${r}" data-shelf="${shelf.id}" data-row="${r}">
           <div class="row-title">${r}段目</div>
           ${itemsHtml}
         </div>
@@ -716,55 +881,80 @@ function renderShelfView(){
       </div>
     `;
   }).join("");
+
+  attachBookDragHandlers(el);
 }
 
-/* --- ドラッグ＆ドロップによる並べ替え --- */
-let dragSrcId = null;
-function onDragStart(e){
-  dragSrcId = e.currentTarget.dataset.id;
-  e.currentTarget.classList.add("dragging");
+/* --- ドラッグハンドルによる並べ替え（マウス・タッチ両対応） --- */
+let bookDrag = null; // {item, pointerId}
+
+function attachBookDragHandlers(container){
+  container.querySelectorAll(".drag-handle").forEach(handle=>{
+    handle.addEventListener("pointerdown", onBookDragStart);
+  });
 }
-function onDragEnd(e){
-  e.currentTarget.classList.remove("dragging");
-}
-function onDragOver(e){
+
+function onBookDragStart(e){
   e.preventDefault();
+  const item = e.currentTarget.closest(".book-item");
+  if(!item) return;
+
+  bookDrag = { item, pointerId: e.pointerId };
+  item.classList.add("dragging");
+  document.body.style.userSelect = "none";
+
+  window.addEventListener("pointermove", onBookDragMove);
+  window.addEventListener("pointerup", onBookDragEnd);
+  window.addEventListener("pointercancel", onBookDragEnd);
 }
-async function onDrop(e){
+
+function onBookDragMove(e){
+  if(!bookDrag) return;
   e.preventDefault();
-  if(!dragSrcId) return;
 
-  const target = e.target.closest(".book-item") || e.target.closest(".row-block");
-  if(!target) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  if(!el) return;
+  const overRow = el.closest(".row-block");
+  if(!overRow) return;
 
-  const newShelfId = target.dataset.shelf;
-  const newRow = parseInt(target.dataset.row);
+  const overItem = el.closest(".book-item");
+  if(overItem && overItem !== bookDrag.item){
+    const rect = overItem.getBoundingClientRect();
+    const before = e.clientY < (rect.top + rect.height/2);
+    overRow.insertBefore(bookDrag.item, before ? overItem : overItem.nextSibling);
+  } else if(!overItem){
+    overRow.appendChild(bookDrag.item);
+  }
+}
 
-  const srcBook = books.find(b=>b.id===dragSrcId);
-  if(!srcBook) return;
+async function onBookDragEnd(){
+  if(!bookDrag) return;
+  window.removeEventListener("pointermove", onBookDragMove);
+  window.removeEventListener("pointerup", onBookDragEnd);
+  window.removeEventListener("pointercancel", onBookDragEnd);
+  document.body.style.userSelect = "";
 
-  // 同じ棚・段にある本のリスト（ドロップ先基準）
-  let rowBooks = books
-    .filter(b=>b.shelfId===newShelfId && b.rowNumber===newRow && b.id!==srcBook.id)
-    .sort((a,b)=>a.position-b.position);
+  const item = bookDrag.item;
+  item.classList.remove("dragging");
 
-  let insertIndex = rowBooks.length;
-  if(target.classList.contains("book-item") && target.dataset.id!==srcBook.id){
-    insertIndex = rowBooks.findIndex(b=>b.id===target.dataset.id);
-    if(insertIndex === -1) insertIndex = rowBooks.length;
+  const newRow = item.closest(".row-block");
+  bookDrag = null;
+  if(!newRow) return;
+
+  const newShelfId = newRow.dataset.shelf;
+  const newRowNumber = parseInt(newRow.dataset.row);
+
+  const orderedIds = [...newRow.querySelectorAll(".book-item")].map(el=>el.dataset.id);
+  for(let i=0; i<orderedIds.length; i++){
+    const b = books.find(x=>x.id===orderedIds[i]);
+    if(b){
+      b.shelfId = newShelfId;
+      b.rowNumber = newRowNumber;
+      b.position = (i+1)*100;
+      await put("books", b);
+    }
   }
 
-  rowBooks.splice(insertIndex, 0, srcBook);
-
-  // 位置を再計算（100刻み）
-  rowBooks.forEach((b, i)=>{
-    b.shelfId = newShelfId;
-    b.rowNumber = newRow;
-    b.position = (i+1)*100;
-    put("books", b);
-  });
-
-  dragSrcId = null;
   renderShelfView();
 }
 
@@ -780,6 +970,12 @@ function openBookModal(bookId){
 
   content.innerHTML = `
     <h2>本の詳細</h2>
+
+    ${b.coverUrl
+      ? `<img class="modal-cover" src="${escapeAttr(b.coverUrl)}" alt="">`
+      : `<div class="modal-cover" style="display:flex;align-items:center;justify-content:center;font-size:32px;">📕</div>`
+    }
+
     <label>書名</label>
     <input type="text" id="m_title" value="${escapeAttr(b.title)}">
     <label>著者標目</label>
@@ -790,6 +986,7 @@ function openBookModal(bookId){
     <input type="text" id="m_year" value="${escapeAttr(b.year)}">
     <label>ISBN</label>
     <input type="text" id="m_isbn" value="${escapeAttr(b.isbn)}">
+    <button class="secondary" style="width:100%;" onclick="refetchCover('${b.id}')">🔄 ISBNから書影を取得する</button>
 
     <label>状態</label>
     <select id="m_status">
@@ -823,6 +1020,26 @@ function openBookModal(bookId){
 
   overlay.style.display = "flex";
 }
+async function refetchCover(bookId){
+  const b = books.find(x=>x.id===bookId);
+  if(!b) return;
+
+  const isbn = document.getElementById("m_isbn").value.trim();
+  if(!isbn){
+    alert("ISBNが入力されていません。");
+    return;
+  }
+
+  const info = await fetchBookInfoByIsbn(isbn);
+  if(info && info.cover){
+    b.coverUrl = info.cover;
+    await put("books", b);
+    openBookModal(bookId); // モーダルを再描画
+  } else {
+    alert("書影が見つかりませんでした。");
+  }
+}
+
 function closeBookModal(){
   document.getElementById("bookModalOverlay").style.display = "none";
 }
@@ -879,21 +1096,30 @@ function renderLoanList(){
   }
   el.innerHTML = target.map(b=>{
     const shelf = shelves.find(s=>s.id===b.shelfId);
-    return `
-      <div class="book-item" onclick="openBookModal('${b.id}')">
-        <div>
-          <div class="book-title">${escapeHtml(b.title)}</div>
-          <div class="book-meta">
-            ${escapeHtml(shelf?shelf.name:"")} / ${b.rowNumber}段目
-            ${b.borrower?(" ・ "+escapeHtml(b.borrower)):""}
-            ${b.outDate?(" ・ "+b.outDate+"〜"):""}
-            ${b.dueDate?(" 期限:"+b.dueDate):""}
-          </div>
-        </div>
-        <span class="status-tag status-${b.status}">${b.status}</span>
-      </div>
-    `;
+    const metaParts = [];
+    metaParts.push(escapeHtml(shelf?shelf.name:"") + " / " + b.rowNumber + "段目");
+    if(b.borrower) metaParts.push(escapeHtml(b.borrower));
+    if(b.outDate) metaParts.push(b.outDate + "〜");
+    if(b.dueDate) metaParts.push("期限:" + b.dueDate);
+
+    return bookItemHtml(b, { extraMeta: metaParts.join(" ・ ") });
   }).join("");
+}
+
+function applyBookInfoToForm(info){
+  document.getElementById("bookTitle").value = info.title || "";
+  document.getElementById("bookAuthor").value = info.author || "";
+  document.getElementById("bookPublisher").value = info.publisher || "";
+  document.getElementById("bookYear").value = info.year || "";
+  document.getElementById("bookCoverUrl").value = info.cover || "";
+
+  const preview = document.getElementById("coverPreview");
+  if(info.cover){
+    preview.src = info.cover;
+    preview.style.display = "";
+  } else {
+    preview.style.display = "none";
+  }
 }
 
 async function lookupByIsbnField(){
@@ -912,10 +1138,7 @@ async function lookupByIsbnField(){
   const info = await fetchBookInfoByIsbn(isbn);
 
   if(info){
-    document.getElementById("bookTitle").value = info.title || "";
-    document.getElementById("bookAuthor").value = info.author || "";
-    document.getElementById("bookPublisher").value = info.publisher || "";
-    document.getElementById("bookYear").value = info.year || "";
+    applyBookInfoToForm(info);
     statusEl.style.color = "var(--ok)";
     statusEl.textContent = "書誌情報を自動入力しました。内容を確認してください。";
   } else {
@@ -976,10 +1199,7 @@ async function onBarcodeDetected(isbn){
 
   document.getElementById("bookIsbn").value = isbn;
   if(info){
-    document.getElementById("bookTitle").value = info.title || "";
-    document.getElementById("bookAuthor").value = info.author || "";
-    document.getElementById("bookPublisher").value = info.publisher || "";
-    document.getElementById("bookYear").value = info.year || "";
+    applyBookInfoToForm(info);
     document.getElementById("scanStatus").textContent = "書誌情報を自動入力しました。内容を確認してください。";
   } else {
     document.getElementById("scanStatus").textContent =
@@ -1002,7 +1222,8 @@ async function fetchBookInfoByIsbn(isbn){
           title: s.title || "",
           author: s.author || "",
           publisher: s.publisher || "",
-          year: (s.pubdate || "").slice(0,4)
+          year: (s.pubdate || "").slice(0,4),
+          cover: s.cover || ""
         };
       }
     }
@@ -1018,7 +1239,8 @@ async function fetchBookInfoByIsbn(isbn){
         title: v.title || "",
         author: (v.authors || []).join(", "),
         publisher: v.publisher || "",
-        year: (v.publishedDate || "").slice(0,4)
+        year: (v.publishedDate || "").slice(0,4),
+        cover: (v.imageLinks && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail)) || ""
       };
     }
   }catch(e){ console.error("Google Books error", e); }
